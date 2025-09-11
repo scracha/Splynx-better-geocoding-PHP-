@@ -187,7 +187,7 @@ class SplynxApiClient
      * This is a fallback method.
      *
      * @param string $address The address to search for.
-     * @return array|null An array with 'lat' and 'lon', or null on error.
+     * @return array|null An array with 'lat' and 'lng', or null on error.
      */
     public function getCoordinatesFromAddressGoogle($address)
     {
@@ -236,6 +236,7 @@ class SplynxApiClient
         
         if (!empty($data['results']) && isset($data['results'][0]['geometry']['location'])) {
             $location = $data['results'][0]['geometry']['location'];
+            // Correctly return the Google API's longitude key 'lng'
             return ['lat' => $location['lat'], 'lng' => $location['lng']];
         }
 
@@ -243,8 +244,25 @@ class SplynxApiClient
     }
 }
 
+// Parse command line arguments for the 'update' and 'geocode' flags
+$options = getopt('', ['update', 'geocode']);
+$performUpdates = isset($options['update']);
+$performGeocoding = $performUpdates && isset($options['geocode']);
+
 echo "Initializing Splynx API client with Basic Authentication...\n";
 $splynx = new SplynxApiClient($splynxBaseUrl, $apiKey, $apiSecret, $googleApiKey);
+
+// Output the current operating mode based on flags
+if ($performUpdates) {
+    echo "Running in update mode.\n";
+    if ($performGeocoding) {
+        echo "  - Geocoding will also be performed.\n";
+    } else {
+        echo "  - Geocoding will be skipped.\n";
+    }
+} else {
+    echo "Running in read-only mode. No API updates will be performed.\n";
+}
 
 echo "\nRetrieving all active customers...\n";
 
@@ -362,23 +380,28 @@ if ($customers !== null) {
                             $attributesNeedUpdate = false;
                             $attributesToUpdate = ['additional_attributes' => []];						
 							
-							
-							if ($newInstallStreet !== null && ($newInstallStreet !== $installStreet) || $usingCustomerAddress)  {
-                                $attributesToUpdate['additional_attributes']['installstreet'] = $newInstallStreet;
-                                $attributesNeedUpdate = true;
-                                $installStreetDisplay = $newInstallStreet; // Update the display variable
-                            }
-                            if ($newInstallTown !== null && ($newInstallTown !== $installTown) || $usingCustomerAddress) {
-                                $attributesToUpdate['additional_attributes']['installtown'] = $newInstallTown;
-                                $attributesNeedUpdate = true;
-                                $installTownDisplay = $newInstallTown; // Update the display variable
-                            }
+							if ($performUpdates) {
+								if ($newInstallStreet !== null && ($newInstallStreet !== $installStreet) || $usingCustomerAddress)  {
+									$attributesToUpdate['additional_attributes']['installstreet'] = $newInstallStreet;
+									$attributesNeedUpdate = true;
+									$installStreetDisplay = $newInstallStreet; // Update the display variable
+								}
+								if ($newInstallTown !== null && ($newInstallTown !== $installTown) || $usingCustomerAddress) {
+									$attributesToUpdate['additional_attributes']['installtown'] = $newInstallTown;
+									$attributesNeedUpdate = true;
+									$installTownDisplay = $newInstallTown; // Update the display variable
+								}
 
-                            // If changes were made, send a PUT request to update the additional_attributes
-                            if ($attributesNeedUpdate) {
-                                $updateEndpoint = 'admin/customers/customer/' . $customer['id'] . '/internet-services--' . $service['id'];
-                                $splynx->put($updateEndpoint, $attributesToUpdate);
-                            }
+								// If changes were made, send a PUT request to update the additional_attributes
+								if ($attributesNeedUpdate) {
+									$updateEndpoint = 'admin/customers/customer/' . $customer['id'] . '/internet-services--' . $service['id'];
+									$splynx->put($updateEndpoint, $attributesToUpdate);
+								}
+							} else {
+								// In read-only mode, use the original values for display
+								$installStreetDisplay = $installStreet ?? 'N/A';
+								$installTownDisplay = $installTown ?? 'N/A';
+							}
                             
                             $initialGeoAddress = $service['geo']['address'] ?? null;
                             $geoMarker = $service['geo']['marker'] ?? null;
@@ -396,8 +419,8 @@ if ($customers !== null) {
                             $geoUpdateData = ['address' => "",'marker' => "" ];
                             $geoNeedsUpdate = false;
 
-                            // Check if the geo address needs to be updated
-                            if (!empty($potentialAddress) && ($updatedGeoAddress === null || $updatedGeoAddress !== $potentialAddress)) {
+                            // Check if the geo address needs to be updated, but only if updates are enabled
+                            if ($performUpdates && !empty($potentialAddress) && ($updatedGeoAddress === null || $updatedGeoAddress !== $potentialAddress)) {
                                 $updatedGeoAddress = $potentialAddress;
                                 $geoUpdateData['address'] = $updatedGeoAddress;
                                 $geoNeedsUpdate = true;
@@ -406,8 +429,8 @@ if ($customers !== null) {
 								$geoUpdateData['address'] = $updatedGeoAddress;
 							}
                             
-                            // Only perform geocoding if address updated or there is no existing geoMarker
-                            if ($geoNeedsUpdate || empty($geoMarker)) {
+                            // Only perform geocoding if both flags are enabled and address updated or there is no existing geoMarker
+                            if ($performGeocoding && ($geoNeedsUpdate || empty($geoMarker))) {
                                 $osmCoords = $splynx->getCoordinatesFromAddressOSM($updatedGeoAddress);
                                 if ($osmCoords !== null) {
                                     $geoLatitude = $osmCoords['lat'];
@@ -446,7 +469,7 @@ if ($customers !== null) {
                             }
 
                             // Perform a single PUT request if any geo data needs to be updated
-                            if ($geoNeedsUpdate) {
+                            if ($performUpdates && $geoNeedsUpdate) {
 								$clearData = ['address' => null, 'marker' => null];
 								$updateEndpoint = 'admin/customers/customer/' . $customer['id'] . '/geo-internet-service--' . $service['id'];
 								$splynx->put($updateEndpoint, $clearData);
