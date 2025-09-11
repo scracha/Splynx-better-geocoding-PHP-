@@ -24,5 +24,9 @@ Recommend creating a demo company with a sample of customers and limiting the AP
 
 Populate the config.php with your Splynx URL, api Key, api Secret and google API Key (for geocoding)
 
+csv file will always be generated
+--update flag will only update Splynx via the AP when set.
+--geocode flag will only perform geocoding when this and the update flag is set
+
 to execute
-php splynx_customers_geoupdate_to_csv.php
+php splynx_customers_geoupdate_to_csv.php --update --geocode
